@@ -3,11 +3,11 @@
 from z3 import *
 
 class BackwardReachable:
-    def __init__(self, location_names):
+    def __init__(self, location_names,delay_var,delay_1_var):
         self.Location, self.location_constants = EnumSort('Location', location_names)
         self.pre_image_num = 0
-        self.delay = Real('delay')
-        self.delay_1 = Real('delay_1')
+        self.delay = delay_var
+        self.delay_1 = delay_1_var
 
     #safety-point check between initial and current state
     def safety_check(self, current_state,initial):
@@ -29,7 +29,7 @@ class BackwardReachable:
             print("System is not unsafe for now...")
             return True
     
-    #Creates substitution pairs for substituting array indices with scalar variables.
+     #Creates substitution pairs for substituting array indices with scalar variables.
     def create_substitution_pairs(self, array_dict, scalar_vars,num_elements):
         substitutions = []
         for key, array in array_dict.items():
@@ -80,7 +80,7 @@ class BackwardReachable:
             exists_old_list = exists_old_list + delay_list + intermediate_delay_list
 
         scalar_current_state_variables = self.create_scalar_vars_for_elements(current_state_vars,num_elem)
-
+        
         substitution_pairs_new = self.create_substitution_pairs(current_state_vars,scalar_current_state_variables,2)
 
         exists_new_dict = {key: value for key, value in scalar_current_state_variables.items() if key not in original_vars}
@@ -113,7 +113,7 @@ class BackwardReachable:
             print("New states introduced during fixed point")
             return False
     
-    #pre-image computation 
+    #pre-image computation
     def preimage_compute(self,current_variables, current_location, current_time, current_delay, current_intermediate_delay ,current_state, transitions,preimage_set,immediate_previous_state_set):
         self.pre_image_num = self.pre_image_num + 1
         solver = Solver()
@@ -219,11 +219,12 @@ class BackwardReachable:
         #if oldState is empty pass the current state and thus reaching a fixed point...
         return current_variables, current_location, current_time, current_delay, current_intermediate_delay, oldState, old_variables, new_preimage_set, new_immediate_previous_state_set
     
-
+    #backward reachability algorithm
     def reachable(self,current_variables,current_location,current_time, current_delay, current_intermediate_delay ,initial,transitions,unsafe,num_elem):
     #initial check between unsafe and initial states
         current_state = unsafe
         current_state_list = {**current_variables,**current_location,**current_time}
+        # print("Current state list: ",current_state_list)
         old_states = None
         old_state_list = None
         state = None

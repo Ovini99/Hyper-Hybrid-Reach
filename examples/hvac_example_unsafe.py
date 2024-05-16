@@ -1,91 +1,73 @@
 #This file contains a simplified HVAC system case study
 #This corresponds to the P1 unsafe hyper-property in our paper resulting in the system being unsafe
 #'Towards SMT-Based Verification of Safety Hyper-Properties in Hybrid Automaton'
-
 from z3 import *
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from backward_reachable import BackwardReachable
+from hybrid_specification import Specification 
 
 #passing parameter of the location names to create array of enum of locations
-location_names = ['L1', 'L2']
-system = BackwardReachable(location_names)
+locations = ['L1','L2']
+spec = Specification(locations)
 
-temperature = Array('temperature',IntSort(),RealSort())
-temperature_1 = Array('temperature_1',IntSort(),RealSort())
-location = Array('location',IntSort(),system.Location)
-location_1 = Array('location_1',IntSort(),system.Location)
-time = Array('time',IntSort(),RealSort())
-time_1 = Array('time_1',IntSort(),RealSort())
-delay = Real('delay')
-delay_1 = Real('delay_1')
-current_variables = {'temperature':Array('temperature',IntSort(),RealSort())}
-current_location = {'location':Array('location',IntSort(),system.Location)}
-current_time = {'time':Array('time',IntSort(),RealSort())}
-current_delay = {'delay':Real('delay')}
-current_intermediate_delay = {'delay_1':Real('delay_1')}
+temperature = Real('temperature')
 
+#use spec.Location to access the enumerated data type 
+#use spec.locations to access the SMT enumerated location 
+# constant L1 and L2 
+location = Const("location",spec.Location)
 
-#Unsafe property
-unsafe = And((time[0]==time[1]),Not(location[1]==location[0]),Not(temperature[0]==temperature[1]))
-print(unsafe)
+#need to pass this dictionary of variables and locations to the 
+#instance of the specification
+variables = {'temperature':temperature}
+locations = {'location':location}
 
-#initial condition
-initial = None
-for i in range(2):
-    if initial is None:
-        initial = And((temperature[i]>=60),(temperature[i]<=70),(time[i]==0),(location[i]==system.location_constants[0]))
-    else:
-        initial = And(initial,And((temperature[i]>=60),(temperature[i]<=70),(time[i]==0),(location[i]==system.location_constants[0])))
-
-#transitions
-transitions = []  
+#create instance of hybrid specification
+spec.create_variables(variables,locations)
 
 #number of quantifiers correspond to the number of trace quantifiers in the hyper-property
-quantifiers_num = 2  
-for i in range(quantifiers_num):
-    unchanged = And([And(temperature_1[j] == Select(temperature, j), 
-                         location_1[j] == Select(location, j), 
-                         time_1[j] == Select(time, j),(time_1[j]>=0))
-                     for j in range(quantifiers_num) if j != i])
-    
-    #continuous transition 1: Controller location 1
-    transitions.append(
-        And(
-            Not(And((delay_1 > 0),(delay_1 <= delay),Not(((temperature[i] + (-2*delay_1))>=60)))),
-            ((temperature[i] + (-2*delay))>=60),
-            (location[i]==system.location_constants[0]),
-            (temperature_1[i]==temperature[i]+ (-2 * delay)),
-            (time_1[i]==time[i]+delay),(delay>0),
-            (location_1[i]==system.location_constants[0]),
-            (time_1[i]>0),
-            unchanged
-            )
-        )
+num_quantifiers = 2
+#initial condition 
+initial_condition = And(temperature>=60,temperature<=70,location==spec.locations[0])
 
-    #continuous transition: Controller location 2
-    transitions.append(
-        And(
-            Not(And((delay_1 > 0),(delay_1 <= delay),Not(((temperature[i]+(0.6*delay_1*(70-temperature[i])))<=70)))),
-            ((temperature[i]+(0.6*delay*(70-temperature[i])))<=70),
-            (location[i]==system.location_constants[1]),
-            (temperature_1[i]==temperature[i]+(0.6*delay*(70-temperature[i]))),
-            (time_1[i]==time[i]+delay),(delay>0),
-            (location_1[i]==system.location_constants[1]),
-            (time_1[i]>0),
-            unchanged
-            )
-        )
-    
-    #discrete transition: Transition from location 1 to location 2
-    transitions.append(And((location[i]==system.location_constants[0]),(location_1[i]==system.location_constants[1]),(temperature[i]<=62),(temperature_1[i]==temperature[i]),(time_1[i]==time[i]),(time_1[i]>0),unchanged))
-    #discrete transition: Transition from location 2 to location 1
-    transitions.append(And((location[i]==system.location_constants[1]),(location_1[i]==system.location_constants[0]),(temperature[i]>=68),(temperature_1[i]==temperature[i]),(time_1[i]==time[i]),(time_1[i]>0),unchanged))
+#transitions is an array of dictionaries
+#create transitions in the following format with the dictionary keys corresponding to 
+#'guard', 'update', 'locationInvariant'
+transitions = []
+#discrete transition: Transition from location 1 to location 2
+transition_1 = {}
+transition_1['guard'] = And((location==spec.locations[0]),(temperature<=62))
+transition_1['update'] = {'location':spec.locations[1]}
+#discrete transition: Transition from location 2 to location 1
+transition_2 = {}
+transition_2['guard'] = And((location==spec.locations[1]),(temperature>=68))
+transition_2['update'] = {'location':spec.locations[0]}
 
-#backward reachability returns unsafe
-safety = system.reachable(current_variables,current_location,current_time,current_delay,current_intermediate_delay,initial,transitions,unsafe,2)
-if safety==False:
-    print("System is unsafe")
-else:
-    print("SYSTEM IS SAFE !")
+#Do not use literals such as {'temperature':-2} as -2 
+#can be interpreted as a Python number, thus use RealVal 
+#if dynamic is a constant
+#the update essentially represents an ODE
+#continuous transition 1: Controller location 1
+transition_3 = {}
+transition_3['locationInvariant'] = And((location==spec.locations[0]),(temperature>=60))
+transition_3['update'] = {'temperature':RealVal(-2)}
+
+#continuous transition 2: Controller location 2
+transition_4 = {}
+transition_4['locationInvariant'] = And((location==spec.locations[1]),(temperature<=70))
+transition_4['update'] = {'temperature': 0.6*(70-temperature)}
+
+transitions.append(transition_1)
+transitions.append(transition_2)
+transitions.append(transition_3)
+transitions.append(transition_4)
+
+variable_dict, time_dict, location_dict = spec.create_specification(initial_condition,transitions,num_quantifiers)
+
+#safety property
+unsafe_formula = And((time_dict['time'][0]==time_dict['time'][1]),Not(location_dict['location'][1]==location_dict['location'][0]),Not(variable_dict['temperature'][0]==variable_dict['temperature'][1]))
+
+#backward reachability returns safe
+spec.check_reachability(unsafe_formula,num_quantifiers)
+
